@@ -1,7 +1,6 @@
 #!/bin/sh
 
 # shellcheck disable=SC2086
-set -x
 
 # Report Galera status to etcd periodically.
 # report_status.sh [mysql user] [mysql password] [cluster name] [interval] [comma separated etcd hosts]
