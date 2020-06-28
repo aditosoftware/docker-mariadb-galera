@@ -105,7 +105,7 @@ EOSQL
     fi
     # end initdb
 
-    if [ -z "$DISCOVERY_SERVICE" ]; then
+    if [ -z "$ETCD_CLUSTER" ]; then
         cluster_join=$CLUSTER_JOIN
     else
         echo
