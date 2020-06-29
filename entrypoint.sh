@@ -3,6 +3,10 @@
 # shellcheck disable=SC2086
 set -e
 
+join() {
+    local IFS="$1"; shift; echo "$*";
+}
+
 if [ "$1" = 'mysqld' ]; then
 
     [ -z "$TTL" ] && TTL=10
@@ -18,7 +22,7 @@ if [ "$1" = 'mysqld' ]; then
     fi
 
     # start initdb
-    if [ ! -s "$DATADIR/grastate.dat" ] && [ -z "$CLUSTER_JOIN" ]; then
+    if [ ! -s "$DATADIR/grastate.dat" ]; then
         INITIALIZED=1
 
         if [ -z "$MYSQL_ROOT_PASSWORD" ] && [ -z "$MYSQL_ALLOW_EMPTY_PASSWORD" ] && [ -z "$MYSQL_RANDOM_ROOT_PASSWORD" ]; then
@@ -55,6 +59,9 @@ if [ "$1" = 'mysqld' ]; then
             echo "GENERATED ROOT PASSWORD: $MYSQL_ROOT_PASSWORD"
         fi
 
+        # Set mariabackup password
+        sed -i "s|SST_PASSWORD|${SST_PASSWORD}|g" /etc/mysql/conf.d/galera.cnf
+
 "${mysql[@]}" <<-EOSQL
     -- What's done in this file shouldn't be replicated
     --  or products like mysql-fabric won't work
@@ -62,8 +69,8 @@ if [ "$1" = 'mysqld' ]; then
     DELETE FROM mysql.user ;
     CREATE USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}' ;
     GRANT ALL ON *.* TO 'root'@'%' WITH GRANT OPTION ;
-    CREATE USER 'xtrabackup'@'localhost' IDENTIFIED BY '$XTRABACKUP_PASSWORD';
-    GRANT RELOAD,LOCK TABLES,REPLICATION CLIENT ON *.* TO 'xtrabackup'@'localhost';
+    CREATE USER 'sst'@'localhost' IDENTIFIED BY '${SST_PASSWORD}';
+    GRANT RELOAD, PROCESS, LOCK TABLES, REPLICATION CLIENT ON *.* TO 'sst'@'localhost';
     GRANT REPLICATION CLIENT ON *.* TO monitor@'%' IDENTIFIED BY 'monitor';
     DROP DATABASE IF EXISTS test ;
     FLUSH PRIVILEGES ;
@@ -142,7 +149,7 @@ EOSQL
           echo ">> Registering $ipaddr in http://$ETCD_CLUSTER"
           curl -s "$URL/$ipaddr/ipaddress" -X PUT -d "value=$ipaddr"
         else
-          curl -s "${URL}?recursive=true\&sorted=true" > /tmp/out
+          curl -s "${URL}?recursive=true&sorted=true" > /tmp/out
           running_nodes=$(jq -r '.node.nodes[].nodes[]? | select(.key | contains ("wsrep_local_state_comment")) | select(.value == "Synced") | .key | split("/") | .[3]' < /tmp/out)
           echo
           echo ">> Running nodes: [${running_nodes}]"
@@ -186,7 +193,7 @@ EOSQL
             bootstrap_flag=1
 
             # Retrieve seqno from etcd
-            curl -s "${URL}?recursive=true\&sorted=true" > /tmp/out
+            curl -s "${URL}?recursive=true&sorted=true" > /tmp/out
             cluster_seqno=$(jq -r '.node.nodes[].nodes[]? | select(.key | contains ("seqno")) | .value' < /tmp/out | tr "\n" ' '| sed -e 's/[[:space:]]*$//')
 
             for i in $cluster_seqno; do
@@ -206,13 +213,14 @@ EOSQL
                     echo ">> This node is safe to bootstrap."
                     cluster_join=
                 else
+                    echo
                     echo ">> Based on timestamp, $node_to_bootstrap is the chosen node to bootstrap."
                     echo ">> Wait again for $TTL seconds to look for a bootstrapped node."
                     sleep $TTL
-                    curl -s ${URL}?recursive=true\&sorted=true > /tmp/out
+                    curl -s "${URL}?recursive=true&sorted=true" > /tmp/out
 
                     # Look for a synced node again
-                    running_nodes2=$(jq -r '.node.nodes[].nodes[]? < /tmp/out | select(.key | contains ("wsrep_local_state_comment")) | select(.value == "Synced") | .key' | awk -F'/' '{print $(NF-1)}' | tr "\n" ' '| sed -e 's/[[:space:]]*$//')
+                    running_nodes2=$(jq -r '.node.nodes[].nodes[]? | select(.key | contains ("wsrep_local_state_comment")) | select(.value == "Synced") | .key' < /tmp/out | awk -F'/' '{print $(NF-1)}' | tr "\n" ' '| sed -e 's/[[:space:]]*$//')
 
                     echo
                     echo ">> Running nodes: [${running_nodes2}]"
@@ -227,13 +235,14 @@ EOSQL
                     fi
                 fi
             else
+                echo
                 echo ">> Refusing to start for now because there is a node holding higher seqno."
                 echo ">> Wait again for $TTL seconds to look for a bootstrapped node."
                 sleep $TTL
 
                 # Look for a synced node again
-                curl -s "${URL}?recursive=true\&sorted=true" > /tmp/out
-                running_nodes3=$(jq -r '.node.nodes[].nodes[]? < /tmp/out | select(.key | contains ("wsrep_local_state_comment")) | select(.value == "Synced") | .key' | awk -F'/' '{print $(NF-1)}' | tr "\n" ' '| sed -e 's/[[:space:]]*$//')
+                curl -s "${URL}?recursive=true&sorted=true" > /tmp/out
+                running_nodes3=$(jq -r '.node.nodes[].nodes[]? | select(.key | contains ("wsrep_local_state_comment")) | select(.value == "Synced") | .key' < /tmp/out | awk -F'/' '{print $(NF-1)}' | tr "\n" ' '| sed -e 's/[[:space:]]*$//')
 
                 echo
                 echo >&2 ">> Running nodes: [${running_nodes3}]"
@@ -255,7 +264,7 @@ EOSQL
         set -e
 
         echo
-        echo >&2 ">> Cluster address is gcomm://$cluster_join"
+        echo ">> Cluster address is gcomm://$cluster_join"
     fi
 
     echo
@@ -263,7 +272,7 @@ EOSQL
     echo "u: root p: $MYSQL_ROOT_PASSWORD, c: $CLUSTER_NAME ttl: $TTL, etcd: $ETCD_CLUSTER"
     nohup /report_status.sh root $MYSQL_ROOT_PASSWORD $CLUSTER_NAME $TTL $ETCD_CLUSTER &
 
-    # set IP address based on the primary interface
+    # Set IP address based on the primary interface
     sed -i "s|WSREP_NODE_ADDRESS|$ipaddr|g" /etc/mysql/conf.d/galera.cnf
 
     echo
@@ -275,7 +284,7 @@ EOSQL
         GRASTATE=$DATADIR/grastate.dat
         [ -f $GRASTATE ] && sed -i "s|safe_to_bootstrap.*|safe_to_bootstrap: 1|g" $GRASTATE
     else
-        export _WSREP_NEW_CLUSTER=''
+        unset _WSREP_NEW_CLUSTER
     fi
 
     if [ "${1:0:1}" = '-' ]; then
@@ -283,9 +292,8 @@ EOSQL
     fi
 
     if [ "$(id -u)" = "0" ]; then
-        exec gosu mysql "$@" --wsrep_cluster_name=$CLUSTER_NAME --wsrep-cluster-address="gcomm://$cluster_join" --wsrep_sst_auth="mariabackup:$MARIABACKUP_PASSWORD" $_WSREP_NEW_CLUSTER
+        exec gosu mysql "$@" --wsrep_cluster_name=$CLUSTER_NAME --wsrep-cluster-address="gcomm://$cluster_join" --wsrep_sst_auth="sst:$SST_PASSWORD" $_WSREP_NEW_CLUSTER
     fi
-
 fi
 
 exec "$@"
