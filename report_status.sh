@@ -15,11 +15,9 @@ ETCD_CLUSTER=$5
 
 check_etcd() {
     curl -s http://$ETCD_CLUSTER/health > /dev/null
-    if curl -s http://$ETCD_CLUSTER/health | jq -e 'contains({ "health": "true"})' > /dev/null; then
-        flag=0
+    if ! curl -s http://$ETCD_CLUSTER/health | jq -e 'contains({ "health": "true"})' > /dev/null; then
+        echo "report>> Couldn't reach etcd."
     fi
-    # Flag is 0 if there is a healthy etcd host
-    [ $flag -ne 0 ] && echo "report>> Couldn't reach healthy etcd nodes."
 }
 
 report_status() {

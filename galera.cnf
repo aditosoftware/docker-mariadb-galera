@@ -4,7 +4,9 @@ wsrep_on = ON
 wsrep_provider = /usr/lib/galera/libgalera_smm.so
 wsrep_cluster_address = gcomm://WSREP_NODE_ADDRESS
 wsrep_sst_method = mariabackup
-wsrep_sst_auth = sst:SST_PASSWORD
+wsrep_sst_auth = SST_USER:SST_PASSWORD
+wsrep_node_address = NODE_IP
+wsrep_node_name = NODE_NAME
 binlog_format = row
 innodb_autoinc_lock_mode = 2
 #
@@ -17,4 +19,4 @@ wsrep_slave_threads = 1
 innodb_flush_log_at_trx_commit = 0
 
 [sst]
-sst-syslog=1
+sst-syslog = 0

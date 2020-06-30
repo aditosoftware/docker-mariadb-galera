@@ -1,46 +1,66 @@
-#!/bin/bash
-# This script checks if a database container is healthy based on cluster type.
-# The purpose of this script is to make Docker capable of monitoring different
-# database cluster type properly.
-# This script will just return exit 0 (OK) or 1 (NOT OK).
+#!/bin/sh
 
-if [[ -f /entrypoint.executing ]]; then
-  exit 0
-fi
+status() {
+    var=$1
+    mysql --user=root --password="$MYSQL_ROOT_PASSWORD" -ABse "SHOW GLOBAL STATUS LIKE '${var}';" | awk '{ print $2 }'
+}
 
-STATE_QUERY="SHOW GLOBAL STATUS WHERE variable_name='wsrep_local_state_comment'"
+galera_cnf() {
+    grep "$1" /etc/mysql/conf.d/galera.cnf | awk -F' = ' '{ print $2 }'
+}
 
-READINESS=0
-LIVENESS=0
+is_ready() {
+    # Return OK when container is still initializing
+    if [ -S /var/run/mysqld/mysqld.sock ]; then
+        if [ -f /tmp/entrypoint.init ]; then
+            if [ "$(status wsrep_ready)" ]; then
+                rm -f /tmp/entrypoint.init
+            else
+                exit 0
+            fi
+        fi
+    fi
+}
 
-# Kubernetes' readiness & liveness flag
-if [[ -n $1 ]]; then
-	[[ $1 == "--readiness" ]] && READINESS=1
-	[[ $1 == "--liveness" ]] && LIVENESS=1
-fi
+health_check() {
+    is_ready
+    ready=$(status wsrep_ready)
+    connected=$(status wsrep_connected)
+    state=$(status wsrep_local_state_comment)
 
-# state == Initialized --> fail all checks
-# state == Synced --> succeed all checks
-# anything else: alive, but not ready
+    if [ "$(status wsrep_ready)" = "ON" ] && \
+        [ "$(status wsrep_connected)" = "ON" ] && \
+        [ "$(status wsrep_local_state_comment)" = "Synced" ]; then
+            exit 0
+        else
+            echo ">> Healthcheck failed"
+            echo "wsrep_ready: $ready"
+            echo "wsrep_connected: $connected"
+            echo "wsrep_local_state_comment: $state"
+            exit 1
+    fi
+}
 
-# explanation of state variable:
-# see http://galeracluster.com/documentation-webpages/monitoringthecluster.html
-#   "When the node is part of the Primary Component, the typical return values
-# are Joining, Waiting on SST, Joined, Synced or Donor. In the event that the
-# node is part of a nonoperational component, the return value is Initialized."
-# "If the node returns any value other than the one listed here, the state
-# comment is momentary and transient. Check the status variable again for an update."
+health_check_verbose() {
+    echo "Galera node info:"
+    echo "  Name: $(galera_cnf wsrep_node_name)"
+    echo "  IPv4 address: $(galera_cnf wsrep_node_address)"
+    is_ready
+    echo ">> wsrep_cluster_address:      $(galera_cnf wsrep_cluster_address)"
+    echo ">> wsrep_ready:                $(status wsrep_ready)"
+    echo ">> wsrep_connected:            $(status wsrep_connected)"
+    echo ">> wsrep_local_state_comment:  $(status wsrep_local_state_comment)"
+    echo ">> wsrep_local_send_queue_avg: $(status wsrep_local_send_queue_avg)"
+    if [ "$(wsrep_flow_control_paused 2>/dev/null)" ]; then
+        echo ">> wsrep_flow_control_paused:  $(wsrep_flow_control_paused)"
+    fi
+}
 
-status=$($MYSQL_BIN $MYSQL_OPTS --host=$MYSQL_HOST --port=$MYSQL_PORT --user=$MYSQL_USERNAME --password=$MYSQL_PASSWORD -e "$CHECK_QUERY;" 2>/dev/null | awk '{print $2;}')
-if [[ $? != 0 || -z "$state" ]]; then
-  echo "1 -- command failed or state empty: $state"
-  exit 1
-fi
-
-if [[ "$state" == "Synced" ]]; then
-  echo "0 -- $state"
-  exit 0
-fi
-
-echo $READINESS
-exit $READINESS
+case "$1" in
+    --verbose|-v)
+        health_check_verbose
+        ;;
+    *)
+        health_check
+        ;;
+esac

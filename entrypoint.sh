@@ -7,6 +7,22 @@ join() {
     local IFS="$1"; shift; echo "$*";
 }
 
+IPADDR=$(hostname -i | awk '{print $1}')
+[ -z $IPADDR ] && IPADDR=$(hostname -I | awk '{print $1}')
+[ -z $NODE_NAME ] && NODE_NAME=$(hostname)
+[ -z $SST_USER ] && SST_USER=sst
+
+# Setup galera.cnf
+sed -i -e "s|NODE_IP|${IPADDR}|g" \
+    -i -e "s|NODE_NAME|${NODE_NAME}|g" \
+    -i -e "s|WSREP_NODE_ADDRESS|${IPADDR}|g" \
+    -i -e "s|SST_USER|${SST_USER}|g" \
+    -i -e "s|SST_PASSWORD|${SST_PASSWORD}|g" \
+    /etc/mysql/conf.d/galera.cnf
+
+# Can be used by health check
+gosu mysql touch /tmp/entrypoint.init
+
 if [ "$1" = 'mysqld' ]; then
 
     [ -z "$TTL" ] && TTL=10
@@ -31,6 +47,8 @@ if [ "$1" = 'mysqld' ]; then
             exit 1
         fi
 
+        echo ">> No existing database found, creating a new one"
+
         echo ">> Running mysql_install_db"
         mysql_install_db --user=mysql --datadir="$DATADIR" --rpm
         echo ">> Finished mysql_install_db"
@@ -40,7 +58,7 @@ if [ "$1" = 'mysqld' ]; then
 
         mysql=(mysql -uroot)
 
-        echo "Waiting on the database for 30s..."
+        echo ">> Waiting on the database for 30s..."
         for i in {30..0}; do
             if echo 'SELECT 1' | "${mysql[@]}" &> /dev/null; then
                 break
@@ -56,11 +74,8 @@ if [ "$1" = 'mysqld' ]; then
         mysql_tzinfo_to_sql /usr/share/zoneinfo | sed 's/Local time zone must be set--see zic manual page/FCTY/' | "${mysql[@]}" mysql
         if [ -n "$MYSQL_RANDOM_ROOT_PASSWORD" ]; then
             MYSQL_ROOT_PASSWORD="$(pwmake 128)"
-            echo "GENERATED ROOT PASSWORD: $MYSQL_ROOT_PASSWORD"
+            echo ">> GENERATED ROOT PASSWORD: $MYSQL_ROOT_PASSWORD"
         fi
-
-        # Set mariabackup password
-        sed -i "s|SST_PASSWORD|${SST_PASSWORD}|g" /etc/mysql/conf.d/galera.cnf
 
 "${mysql[@]}" <<-EOSQL
     -- What's done in this file shouldn't be replicated
@@ -69,8 +84,8 @@ if [ "$1" = 'mysqld' ]; then
     DELETE FROM mysql.user ;
     CREATE USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}' ;
     GRANT ALL ON *.* TO 'root'@'%' WITH GRANT OPTION ;
-    CREATE USER 'sst'@'localhost' IDENTIFIED BY '${SST_PASSWORD}';
-    GRANT RELOAD, PROCESS, LOCK TABLES, REPLICATION CLIENT ON *.* TO 'sst'@'localhost';
+    CREATE USER '${SST_USER}'@'localhost' IDENTIFIED BY '${SST_PASSWORD}';
+    GRANT RELOAD, PROCESS, LOCK TABLES, REPLICATION CLIENT ON *.* TO '${SST_USER}'@'localhost';
     GRANT REPLICATION CLIENT ON *.* TO monitor@'%' IDENTIFIED BY 'monitor';
     DROP DATABASE IF EXISTS test ;
     FLUSH PRIVILEGES ;
@@ -100,23 +115,23 @@ EOSQL
         fi
 
         if ! kill -s TERM "$pid" || ! wait "$pid"; then
-            echo >&2 'MySQL init process failed.'
+            echo >&2 "Error: MySQL init process failed."
             exit 1
         fi
 
         chown -R mysql:mysql "$DATADIR"
 
-        echo
         echo ">> MariaDB database initialized."
         echo
     fi
     # end initdb
 
+    # start EMPTY ETCD_CLUSTER
+    # TODO: unsupported
     if [ -z "$ETCD_CLUSTER" ]; then
         cluster_join=$CLUSTER_JOIN
     else
-        echo
-        echo '>> Registering with etcd cluster'
+        echo ">> Registering with etcd cluster"
 
         if ! curl -s http://$ETCD_CLUSTER/health > /dev/null; then
             echo >&2 "Error: etcd cluster is not available."
@@ -139,21 +154,19 @@ EOSQL
         # Read the list of registered IP addresses
         echo ">> Retrieving list of keys for $CLUSTER_NAME"
 
-        cluster_join=$(curl -s $URL | jq -r '.node.nodes[].key | split("/") | .[3]' | sed 's/ /,/g')
+        cluster_join=$(curl -s $URL | jq -r '.? | .node.nodes[].key | split("/") | .[3]' | sed 's/ /,/g')
 
-        ipaddr=$(hostname -i | awk '{print $1}')
-        [ -z $ipaddr ] && ipaddr=$(hostname -I | awk '{print $1}')
-
-        if [ -z $cluster_join ]; then
+        if [[ -z $cluster_join ]]; then
           echo
-          echo ">> Registering $ipaddr in http://$ETCD_CLUSTER"
-          curl -s "$URL/$ipaddr/ipaddress" -X PUT -d "value=$ipaddr"
+          echo ">> Registering first node ($IPADDR) in http://$ETCD_CLUSTER"
+          curl -s "$URL/$IPADDR/ipaddress" -X PUT -d "value=$IPADDR"
         else
           curl -s "${URL}?recursive=true&sorted=true" > /tmp/out
           running_nodes=$(jq -r '.node.nodes[].nodes[]? | select(.key | contains ("wsrep_local_state_comment")) | select(.value == "Synced") | .key | split("/") | .[3]' < /tmp/out)
-          echo
+
           echo ">> Running nodes: [${running_nodes}]"
 
+          # TODO: don't do that on a new node not present in etcd
           if [ -z "$running_nodes" ]; then
             # if there is no Synced node, determine the sequence number.
             TMP=/var/lib/mysql/$(hostname).err
@@ -166,7 +179,7 @@ EOSQL
             seqno=$(tr ' ' "\n" < $TMP | grep -e '[a-z0-9]*-[a-z0-9]*:[0-9]' | head -1 | cut -d ":" -f 2)
 
             # if this is a new container, set seqno to 0
-            if [ $INITIALIZED -eq 1 ]; then
+            if [ $INITIALIZED ] && [ $INITIALIZED -eq 1 ]; then
                 echo
                 echo ">> This is a new container, thus setting seqno to 0."
                 seqno=0
@@ -176,7 +189,7 @@ EOSQL
                 echo
                 echo ">> Reporting seqno:$seqno to etcd cluster ${ETCD_CLUSTER}."
                 WAIT=$((TTL * 2))
-                curl -s "$URL/$ipaddr/seqno" -X PUT -d "value=$seqno&ttl=$WAIT"
+                curl -s "$URL/$IPADDR/seqno" -X PUT -d "value=$seqno&ttl=$WAIT"
             else
                 seqno=$(tr ' ' "\n" < $TMP | grep -e '[a-z0-9]*-[a-z0-9]*:[0-9]' | head -1)
                 echo >&2 "Error: Unable to determine Galera sequence number."
@@ -208,7 +221,7 @@ EOSQL
                 # node_to_bootstrap=$(cat /tmp/out | jq -c '.node.nodes[].nodes[]?' | grep seqno | tr ',:\"' ' ' | sort -k 11 | head -1 | awk -F'/' '{print $(NF-1)}')
                 # The earliest node to report if there is no higher seqno is computed wrongly: issue #6
                 node_to_bootstrap=$(jq -c '.node.nodes[].nodes[]?' < /tmp/out | grep seqno | tr ',:"' ' ' | sort -k5,5r -k11 | head -1 | awk -F'/' '{print $(NF-1)}')
-                if [ "$node_to_bootstrap" == "$ipaddr" ]; then
+                if [ "$node_to_bootstrap" == "$IPADDR" ]; then
                     echo
                     echo ">> This node is safe to bootstrap."
                     cluster_join=
@@ -257,23 +270,16 @@ EOSQL
                 fi
             fi
           else
-            # if there is a Synced node, join the address
-            cluster_join=$(join , $running_nodes)
+              # if there is a Synced node, join the address
+              cluster_join=$(join , $running_nodes)
           fi
         fi
         set -e
-
-        echo
-        echo ">> Cluster address is gcomm://$cluster_join"
-    fi
+    fi # end EMPTY ETCD_CLUSTER
 
     echo
     echo ">> Starting reporting script in the background"
-    echo "u: root p: $MYSQL_ROOT_PASSWORD, c: $CLUSTER_NAME ttl: $TTL, etcd: $ETCD_CLUSTER"
     nohup /report_status.sh root $MYSQL_ROOT_PASSWORD $CLUSTER_NAME $TTL $ETCD_CLUSTER &
-
-    # Set IP address based on the primary interface
-    sed -i "s|WSREP_NODE_ADDRESS|$ipaddr|g" /etc/mysql/conf.d/galera.cnf
 
     echo
     echo ">> Starting mysqld process"
@@ -292,7 +298,7 @@ EOSQL
     fi
 
     if [ "$(id -u)" = "0" ]; then
-        exec gosu mysql "$@" --wsrep_cluster_name=$CLUSTER_NAME --wsrep-cluster-address="gcomm://$cluster_join" --wsrep_sst_auth="sst:$SST_PASSWORD" $_WSREP_NEW_CLUSTER
+        exec gosu mysql "$@" --wsrep_cluster_name=$CLUSTER_NAME --wsrep-cluster-address="gcomm://$cluster_join" --wsrep_sst_auth="$SST_USER:$SST_PASSWORD" $_WSREP_NEW_CLUSTER
     fi
 fi
 

@@ -79,6 +79,7 @@ RUN set -ex; \
     "mariadb-client=$MARIADB_VERSION" \
     "mariadb-server=$MARIADB_VERSION" \
     "mariadb-backup-$MARIADB_MAJOR" \
+    procps \
     socat \
     ; \
   apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false dirmngr; \
