@@ -133,7 +133,7 @@ EOSQL
     else
         echo ">> Registering with etcd cluster"
 
-        if ! curl -s http://$ETCD_CLUSTER/health > /dev/null; then
+        if ! curl -s -m 60 http://$ETCD_CLUSTER/health > /dev/null; then
             echo >&2 "Error: etcd cluster is not available."
             exit 1
         fi
@@ -159,6 +159,7 @@ EOSQL
         if [[ -z $cluster_join ]]; then
           echo
           echo ">> Registering first node ($IPADDR) in http://$ETCD_CLUSTER"
+          curl -s "$URL/$IPADDR" -X PUT -d dir=true -d ttl=120
           curl -s "$URL/$IPADDR/ipaddress" -X PUT -d "value=$IPADDR"
         else
           curl -s "${URL}?recursive=true&sorted=true" > /tmp/out
@@ -279,7 +280,7 @@ EOSQL
 
     echo
     echo ">> Starting reporting script in the background"
-    nohup /report_status.sh root $MYSQL_ROOT_PASSWORD $CLUSTER_NAME $TTL $ETCD_CLUSTER &
+    nohup /report_status.sh root $MYSQL_ROOT_PASSWORD $CLUSTER_NAME $TTL $ETCD_CLUSTER $IPADDR &
 
     echo
     echo ">> Starting mysqld process"

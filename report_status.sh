@@ -12,11 +12,16 @@ PASSWORD=$2
 CLUSTER_NAME=$3
 TTL=$4
 ETCD_CLUSTER=$5
+IPADDR=$6
 
 check_etcd() {
-    curl -s http://$ETCD_CLUSTER/health > /dev/null
-    if ! curl -s http://$ETCD_CLUSTER/health | jq -e 'contains({ "health": "true"})' > /dev/null; then
-        echo "report>> Couldn't reach etcd."
+    if ! curl -s -m 60 http://$ETCD_CLUSTER/health > /dev/null; then
+        echo >&2 "Error: etcd cluster is not available. $?"
+    fi
+
+    etcd_health=$(curl -s http://$ETCD_CLUSTER/health | jq -r '.health')
+    if [ "$etcd_health" != "true" ]; then
+        echo >&2 "Error: etcd cluster not ready."
     fi
 }
 
@@ -28,15 +33,18 @@ report_status() {
     check_etcd
 
     URL="http://$ETCD_CLUSTER/v2/keys/galera/$CLUSTER_NAME"
+
+    # let the top dir expire after 120s, assume container is no longer available
+    curl -s "$URL/$IPADDR" -X PUT -d ttl=120 -d dir=true -d prevExist=true > /dev/null
+
     output=$(mysql --user=$USER --password=$PASSWORD -A -Bse "show status like '$var'" 2> /dev/null)
     if [ -z $key ]; then
       key=$(echo $output | awk '{ print $1 }')
     fi
     value=$(echo $output | awk '{ print $2 }')
-    ipaddr=$(hostname -i | awk '{ print $1 }')
 
     if [ -n "$value" ]; then
-      curl -s "$URL/$ipaddr/$key" -X PUT -d "value=$value&ttl=$TTL" > /dev/null
+      curl -s "$URL/$IPADDR/$key" -X PUT -d value=$value -d ttl=$TTL > /dev/null
     fi
   fi
 }
