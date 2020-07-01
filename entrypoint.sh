@@ -280,7 +280,7 @@ EOSQL
 
     echo
     echo ">> Starting reporting script in the background"
-    nohup /report_status.sh root $MYSQL_ROOT_PASSWORD $CLUSTER_NAME $TTL $ETCD_CLUSTER $IPADDR &
+    nohup report_status.sh root $MYSQL_ROOT_PASSWORD $CLUSTER_NAME $TTL $ETCD_CLUSTER $IPADDR &
 
     echo
     echo ">> Starting mysqld process"

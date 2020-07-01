@@ -105,8 +105,8 @@ ADD galera.cnf /etc/mysql/conf.d/galera.cnf
 RUN chown mysql:mysql -R /etc/mysql/conf.d
 
 COPY entrypoint.sh /entrypoint.sh
-COPY report_status.sh /report_status.sh
-COPY healthcheck.sh /healthcheck.sh
+COPY report_status.sh /usr/local/bin/report_status.sh
+COPY healthcheck.sh /usr/local/bin/healthcheck.sh
 
 EXPOSE 3306 4444 4567 4568
 
