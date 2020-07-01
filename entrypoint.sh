@@ -23,6 +23,10 @@ sed -i -e "s|NODE_IP|${IPADDR}|g" \
 # Can be used by health check
 gosu mysql touch /tmp/entrypoint.init
 
+if [ "${1:0:1}" = '-' ]; then
+    set -- mysqld "$@"
+fi
+
 if [ "$1" = 'mysqld' ]; then
 
     [ -z "$TTL" ] && TTL=10
@@ -292,10 +296,6 @@ EOSQL
         [ -f $GRASTATE ] && sed -i "s|safe_to_bootstrap.*|safe_to_bootstrap: 1|g" $GRASTATE
     else
         unset _WSREP_NEW_CLUSTER
-    fi
-
-    if [ "${1:0:1}" = '-' ]; then
-        set -- mysqld "$@"
     fi
 
     if [ "$(id -u)" = "0" ]; then
