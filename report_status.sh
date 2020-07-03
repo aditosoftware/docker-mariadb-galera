@@ -26,8 +26,6 @@ check_etcd() {
         echo "$metrics" | grep -s ^etcd_server_has_leader >&2
         echo "$metrics" | grep -s ^etcd_server_leader_changes_seen_total >&2
         echo "$metrics" | grep -s ^etcd_server_proposals_failed_total >&2
-        echo "$metrics" | grep -s ^etcd_disk_wal_fsync_duration_seconds_bucket >&2
-        echo "$metrics" | grep -s ^etcd_disk_backend_commit_duration_seconds_bucket >&2
     fi
 }
 
