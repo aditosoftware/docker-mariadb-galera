@@ -1,7 +1,8 @@
 #!/bin/sh
 
-galera_cnf() {
-    grep "$1" /etc/mysql/conf.d/galera.cnf | awk -F' = ' '{ print $2 }'
+status() {
+    var=$1
+    mysql --user=root --password="$MYSQL_ROOT_PASSWORD" -ABse "SHOW GLOBAL STATUS LIKE '${var}';" | awk '{ print $2 }'
 }
 
 is_ready() {
