@@ -16,5 +16,3 @@ The Docker image requires/accepts the following parameters:
 ## TODO
 
 * WSREP_SST: [INFO] Logging all stderr of SST/Innobackupex to syslog
-* [Warning] WSREP: Failed to prepare for incremental state transfer: Local state UUID (...) does not match group state UUID (...): 1 (Operation not permitted)
-	 at galera/src/replicator_str.cpp:prepare_for_IST():482. IST will be unavailable.
