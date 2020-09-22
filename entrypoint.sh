@@ -197,8 +197,8 @@ EOSQL
             fi
 
             if [ -n "$seqno" ]; then
-                echo ">> Determining the Galera last committed sequence number"
-                seqno=$(galera_recovery 2>/dev/null | awk -F: 'NR==1 { print $3 }')
+                echo ">> Determining the last committed sequence number"
+                seqno=$(galera_recovery 2>/dev/null | awk -F: 'NR==1 { print $2 }')
             fi
 
             if [ -n "$seqno" ]; then
