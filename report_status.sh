@@ -17,6 +17,7 @@ IPADDR=$6
 check_etcd() {
     if ! curl -s -m 60 http://$ETCD_CLUSTER/health > /dev/null; then
         echo >&2 "$(date +'%F %T') report_status [Error]: etcd cluster is not available. $?"
+        return 1
     fi
 
     etcd_health=$(curl -s http://$ETCD_CLUSTER/health | jq -r '.health')
@@ -26,6 +27,7 @@ check_etcd() {
         echo "$metrics" | grep -s ^etcd_server_has_leader >&2
         echo "$metrics" | grep -s ^etcd_server_leader_changes_seen_total >&2
         echo "$metrics" | grep -s ^etcd_server_proposals_failed_total >&2
+        return 1
     fi
 }
 

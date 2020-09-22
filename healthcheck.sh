@@ -18,10 +18,6 @@ is_ready() {
     if ! status wsrep_ready; then
         exit 1
     fi
-    # entrypoint is finished at this point
-    if [ -f /tmp/entrypoint.init ]; then
-        rm -f /tmp/entrypoint.init
-    fi
 }
 
 is_alive() {
