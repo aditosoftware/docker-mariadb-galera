@@ -1,0 +1,30 @@
+[galera]
+# Mandatory settings
+wsrep_on = ON
+wsrep_provider = /usr/lib/galera/libgalera_smm.so
+wsrep_cluster_address = gcomm://WSREP_NODE_ADDRESS
+wsrep_sst_method = mariabackup
+wsrep_sst_auth = SST_USER:SST_PASSWORD
+wsrep_node_address = NODE_IP
+wsrep_node_name = NODE_NAME
+binlog_format = row
+innodb_autoinc_lock_mode = 2
+#
+# Allow server to accept connections on all interfaces.
+#
+bind-address = 0.0.0.0
+#
+# Optional setting
+wsrep_slave_threads = 4
+innodb_flush_log_at_trx_commit = 0
+# GTID
+wsrep_gtid_mode      = ON
+wsrep_gtid_domain_id = 0
+wsrep_restart_slave  = 1
+log_bin              = /var/log/mysql/mariadb_log.bin
+log_slave_updates    = ON
+server_id            = 42
+gtid_domain_id       = GTID_DOMAIN_ID
+
+[sst]
+sst-syslog = 0

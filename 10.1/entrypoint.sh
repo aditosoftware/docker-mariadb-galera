@@ -14,11 +14,12 @@ IPADDR=$(hostname -i | awk '{print $1}')
 
 # Setup galera.cnf
 sed -i \
+    -e "s|GTID_DOMAIN_ID|${GTID_DOMAIN_ID}|g" \
     -e "s|NODE_IP|${IPADDR}|g" \
     -e "s|NODE_NAME|${NODE_NAME}|g" \
-    -e "s|WSREP_NODE_ADDRESS|${IPADDR}|g" \
-    -e "s|SST_USER|${SST_USER}|g" \
     -e "s|SST_PASSWORD|${SST_PASSWORD}|g" \
+    -e "s|SST_USER|${SST_USER}|g" \
+    -e "s|WSREP_NODE_ADDRESS|${IPADDR}|g" \
     /etc/mysql/conf.d/galera.cnf
 
 if [ "${1:0:1}" = '-' ]; then
@@ -131,12 +132,15 @@ EOSQL
         # verify that mysqld completed last shutdown cleanly
         # and try to recover the sequence number
         # This will allow to use IST in many cases
-        echo ">> Determining the last committed sequence number"
-        seqno=$(galera_recovery 2>/dev/null | awk -F: 'NR==1 { print $2 }')
-        if [ -n "$seqno" ]; then
-            sed -i "s|seqno.*|seqno: ${seqno}|" $GRASTATE
-        else
-            echo >&2 "Error: last sequence number can't be determined."
+        echo ">> Found an existing Galera setup"
+        if grep -qe "^seqno.*\-1$" $GRASTATE; then
+            echo ">> Determining the last committed sequence number"
+            seqno=$(galera_recovery 2>/dev/null | awk -F: 'NR==1 { print $2 }')
+            if [ -n "$seqno" ]; then
+                sed -i "s|seqno.*|seqno: ${seqno}|" $GRASTATE
+            else
+                echo >&2 "Error: last sequence number can't be determined."
+            fi
         fi
     fi
     # end initdb
@@ -186,7 +190,7 @@ EOSQL
           if [ -z "$running_synced_nodes" ]; then
             # if there is no Synced node, determine the sequence number.
             echo
-            echo ">> There is no node in synced state."
+            echo ">> There is no node in Synced state."
             echo ">> It's unsafe to bootstrap unless the sequence number is the latest."
 
             # if this is a new container, set seqno to 0

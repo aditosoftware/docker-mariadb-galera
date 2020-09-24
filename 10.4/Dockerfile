@@ -1,7 +1,7 @@
-FROM debian:stretch-slim
+FROM debian:buster-slim
 
-ARG MARIADB_MAJOR=10.1
-ARG MARIADB_VERSION=10.1.46+maria-1~stretch
+ARG MARIADB_MAJOR=10.4
+ARG MARIADB_VERSION=1:10.4.14+maria~buster
 
 ENV GOSU_VERSION 1.12
 
@@ -41,7 +41,7 @@ RUN set -eux; \
     gosu nobody true
 
 RUN set -e; \
-  echo "deb [arch=amd64] http://ftp.hosteurope.de/mirror/mariadb.org/repo/10.1/debian stretch main" > /etc/apt/sources.list.d/mariadb.list; \
+  echo "deb [arch=amd64] http://ftp.hosteurope.de/mirror/mariadb.org/repo/$MARIADB_MAJOR/debian buster main" > /etc/apt/sources.list.d/mariadb.list; \
   { \
     echo 'Package: *'; \
     echo 'Pin: release o=MariaDB'; \
@@ -60,7 +60,7 @@ ENV GPG_KEYS \
 RUN set -ex; \
 	export GNUPGHOME="$(mktemp -d)"; \
 	for key in $GPG_KEYS; do \
-		gpg --batch --keyserver eu.pool.sks-keyservers.net --recv-keys "$key"; \
+		gpg --batch --keyserver ha.pool.sks-keyservers.net --recv-keys "$key"; \
 	done; \
 	gpg --batch --export $GPG_KEYS > /etc/apt/trusted.gpg.d/mariadb.gpg; \
 	command -v gpgconf > /dev/null && gpgconf --kill all ||: ; \
@@ -72,13 +72,14 @@ RUN set -ex; \
     echo "mariadb-server-$MARIADB_MAJOR" mysql-server/root_password_again password 'unused'; \
   } | debconf-set-selections; \
   apt-get update; \
+  apt-cache search galera; \
   apt-get install -y \
-    galera-3 \
+    galera-4 \
     jq \
     libpwquality-tools \
     "mariadb-client=$MARIADB_VERSION" \
     "mariadb-server=$MARIADB_VERSION" \
-    "mariadb-backup-$MARIADB_MAJOR" \
+    "mariadb-backup" \
     procps \
     socat \
     ; \

@@ -15,8 +15,16 @@ innodb_autoinc_lock_mode = 2
 bind-address = 0.0.0.0
 #
 # Optional setting
-wsrep_slave_threads = 1
+wsrep_slave_threads = 4
 innodb_flush_log_at_trx_commit = 0
+# GTID
+wsrep_gtid_mode      = ON
+wsrep_gtid_domain_id = 0
+wsrep_restart_slave  = 1
+log_bin              = /var/log/mysql/mariadb_log.bin
+log_slave_updates    = ON
+server_id            = 42
+gtid_domain_id       = GTID_DOMAIN_ID
 
 [sst]
 sst-syslog = 0
