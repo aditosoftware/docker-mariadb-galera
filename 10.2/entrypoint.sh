@@ -167,6 +167,9 @@ EOSQL
 
         set +e
 
+        # remove an existing key with a same IP address if present
+        curl -s "$URL/$IPADDR?recursive=true" -X DELETE
+
         echo ">> Waiting for $TTL seconds to read non-expired keys.."
         sleep $TTL
 
