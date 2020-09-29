@@ -74,6 +74,7 @@ RUN set -ex; \
   apt-get update; \
   apt-get install -y \
     galera-3 \
+    galera-arbitrator-3 \
     jq \
     libpwquality-tools \
     "mariadb-client=$MARIADB_VERSION" \
@@ -110,5 +111,6 @@ COPY healthcheck.sh /usr/local/bin/healthcheck.sh
 
 EXPOSE 3306 4444 4567 4568
 
+WORKDIR /var/lib/mysql
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["mysqld"]

@@ -7,6 +7,21 @@ join() {
     local IFS="$1"; shift; echo "$*";
 }
 
+stop_node() {
+    # ensure node is removed from etcd on shutdown
+    echo
+    echo '>> Stopping mysqld'
+    kill -TERM $pid
+    wait $pid
+    echo '>> Removing node from etcd'
+    if curl -s "$URL/$IPADDR?recursive=true" -X DELETE > /dev/null; then
+        echo '>> Shutdown completed'
+    else
+        echo >&2 'Error: removing from etcd failed'
+    fi
+}
+
+
 IPADDR=$(hostname -i | awk '{print $1}')
 [ -z $IPADDR ] && IPADDR=$(hostname -I | awk '{print $1}')
 [ -z $NODE_NAME ] && NODE_NAME=$(hostname)
@@ -19,6 +34,7 @@ sed -i \
     -e "s|NODE_NAME|${NODE_NAME}|g" \
     -e "s|SST_PASSWORD|${SST_PASSWORD}|g" \
     -e "s|SST_USER|${SST_USER}|g" \
+    -e "s|WSREP_CLUSTER_NAME|${CLUSTER_NAME}|g" \
     -e "s|WSREP_NODE_ADDRESS|${IPADDR}|g" \
     /etc/mysql/conf.d/galera.cnf
 
@@ -27,6 +43,8 @@ if [ "${1:0:1}" = '-' ]; then
 fi
 
 if [ "$1" = 'mysqld' ]; then
+    # handle SIGTERM
+    trap 'stop_node' SIGTERM
 
     [ -z "$TTL" ] && TTL=10
 
@@ -54,11 +72,14 @@ if [ "$1" = 'mysqld' ]; then
 
         echo ">> No existing database found, creating a new one"
 
+        # disable Galera configuration at initialization time
+        mv /etc/mysql/conf.d/galera.{cnf,disabled}
+
         echo ">> Running mysql_install_db"
         mysql_install_db --user=mysql --datadir="$DATADIR" --rpm
         echo ">> Finished mysql_install_db"
 
-        mysqld --user=mysql --datadir="$DATADIR" --skip-networking --wsrep-cluster-address='gcomm://' &
+        mysqld --user=mysql --datadir="$DATADIR" --skip-networking &
         pid="$!"
 
         mysql=(mysql -uroot)
@@ -126,6 +147,9 @@ EOSQL
 
         chown -R mysql:mysql "$DATADIR"
 
+        # re-enable Galera
+        mv /etc/mysql/conf.d/galera.{disabled,cnf}
+
         echo ">> MariaDB database initialized."
         echo
     else
@@ -134,13 +158,8 @@ EOSQL
         # This will allow to use IST in many cases
         echo ">> Found an existing Galera setup"
         if grep -qe "^seqno.*\-1$" $GRASTATE; then
-            echo ">> Determining the last committed sequence number"
-            seqno=$(galera_recovery 2>/dev/null | awk -F: 'NR==1 { print $2 }')
-            if [ -n "$seqno" ]; then
-                sed -i "s|seqno.*|seqno: ${seqno}|" $GRASTATE
-            else
-                echo >&2 "Error: last sequence number can't be determined."
-            fi
+            echo ">> Sequence number not set, last shutdown not completed cleanly"
+            seqno_not_set=1
         fi
     fi
     # end initdb
@@ -167,14 +186,8 @@ EOSQL
 
         set +e
 
-        # remove an existing key with a same IP address if present
-        curl -s "$URL/$IPADDR?recursive=true" -X DELETE
-
         echo ">> Waiting for $TTL seconds to read non-expired keys.."
         sleep $TTL
-
-        # Read the list of registered IP addresses
-        echo ">> Retrieving list of keys for $CLUSTER_NAME"
 
         cluster_join=$(curl -s $URL | jq -r '.? | .node.nodes[].key | split("/") | .[3]' | sed 's/ /,/g')
 
@@ -188,6 +201,17 @@ EOSQL
           running_synced_nodes=$(jq -r '.node.nodes[].nodes[]? | select(.key | contains ("wsrep_local_state_comment")) | select(.value == "Synced") | .key | split("/") | .[3]' < /tmp/out)
           echo
           echo ">> Running nodes in Synced state: [${running_synced_nodes}]"
+
+          if [[ -n $seqno_not_set ]]; then
+              echo ">> Determining the last committed sequence number"
+              seqno=$(galera_recovery 2>/dev/null | awk -F: 'NR==1 { print $2 }')
+              if [ -n "$seqno" ]; then
+                  sed -i "s|seqno.*|seqno: ${seqno}|" $GRASTATE
+              else
+                  echo ">> The last sequence number can't be determined."
+                  echo ">> IST will be not available."
+              fi
+          fi
 
           # start RUNNING_NODES
           if [ -z "$running_synced_nodes" ]; then
@@ -214,7 +238,7 @@ EOSQL
                 WAIT=$((TTL * 2))
                 curl -s "$URL/$IPADDR/seqno" -X PUT -d "value=$seqno&ttl=$WAIT"
             else
-                echo >&2 "Error: Unable to determine Galera sequence number, aborting."
+                echo >&2 "Error: Unable to report the sequence number, aborting."
                 exit 1
             fi
 
@@ -309,14 +333,38 @@ EOSQL
     if [ -z $cluster_join ]; then
         export _WSREP_NEW_CLUSTER='--wsrep-new-cluster'
         # set safe_to_bootstrap = 1
-        [ -f $GRASTATE ] && sed -i "s|safe_to_bootstrap.*|safe_to_bootstrap: 1|g" $GRASTATE
+        if [ -f $GRASTATE ]; then
+            sed -i "s|safe_to_bootstrap.*|safe_to_bootstrap: 1|g" $GRASTATE
+        fi
     else
         unset _WSREP_NEW_CLUSTER
     fi
 
     if [ "$(id -u)" = "0" ]; then
-        exec gosu mysql "$@" --wsrep_cluster_name=$CLUSTER_NAME --wsrep-cluster-address="gcomm://$cluster_join" --wsrep_sst_auth="$SST_USER:$SST_PASSWORD" $_WSREP_NEW_CLUSTER
+        gosu mysql "$@" --wsrep-cluster-address="gcomm://$cluster_join" $_WSREP_NEW_CLUSTER &
+        pid=$!
+        wait $pid
     fi
+fi
+
+if [ "$1" = 'garbd' ]; then
+    if ! curl -s -m 60 http://$ETCD_CLUSTER/health > /dev/null; then
+        echo >&2 "Error: etcd cluster is not available."
+        exit 1
+    fi
+
+    etcd_health=$(curl -s http://$ETCD_CLUSTER/health | jq -r '.health')
+    if [ "$etcd_health" == "false" ]; then
+        echo >&2 "Error: etcd cluster not ready."
+        exit 1
+    fi
+
+    URL="http://$ETCD_CLUSTER/v2/keys/galera/$CLUSTER_NAME"
+    cluster_join=$(curl -s $URL | jq -r '.? | .node.nodes[].key | split("/") | .[3]' | sed 's/ /,/g')
+    if [[ -z $cluster_join ]]; then
+        echo >&2 "Error: garbd can't be started, cluster: $CLUSTER_NAME not registered in etcd"
+    fi
+    gosu mysql "$@" --group="$CLUSTER_NAME" --options gmcast.listen_addr=tcp://0.0.0.0:4444 --address="gcomm://$cluster_join"
 fi
 
 exec "$@"

@@ -72,9 +72,9 @@ RUN set -ex; \
     echo "mariadb-server-$MARIADB_MAJOR" mysql-server/root_password_again password 'unused'; \
   } | debconf-set-selections; \
   apt-get update; \
-  apt-cache search galera; \
   apt-get install -y \
     galera-4 \
+    galera-arbitrator-4 \
     jq \
     libpwquality-tools \
     "mariadb-client=$MARIADB_VERSION" \
@@ -111,5 +111,6 @@ COPY healthcheck.sh /usr/local/bin/healthcheck.sh
 
 EXPOSE 3306 4444 4567 4568
 
+WORKDIR /var/lib/mysql
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["mysqld"]
