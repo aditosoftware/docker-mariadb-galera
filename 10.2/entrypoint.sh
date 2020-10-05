@@ -3,6 +3,10 @@
 # shellcheck disable=SC2086
 set -e
 
+if [[ -n $DEBUG_ENTRYPOINT ]]; then
+    set -x
+fi
+
 join() {
     local IFS="$1"; shift; echo "$*";
 }
