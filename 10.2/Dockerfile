@@ -1,7 +1,7 @@
 FROM debian:stretch-slim
 
 ARG MARIADB_MAJOR=10.2
-ARG MARIADB_VERSION=10.2.33+maria~stretch
+ARG MARIADB_VERSION=10.2.38+maria~stretch
 
 ENV GOSU_VERSION 1.12
 
