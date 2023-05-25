@@ -76,7 +76,7 @@ RUN set -ex; \
 
 # bashbrew-architectures: amd64 arm64v8 ppc64le
 ARG MARIADB_MAJOR=10.5
-ARG MARIADB_VERSION=1:10.5.10+maria~buster
+ARG MARIADB_VERSION=1:10.5.20+maria~buster
 # release-status:Stable
 # (https://downloads.mariadb.org/mariadb/+releases/)
 

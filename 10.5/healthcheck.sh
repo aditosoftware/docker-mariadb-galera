@@ -6,21 +6,11 @@ status() {
 }
 
 is_ready() {
-    # check for mysqld socket
-    if [ ! -S /var/run/mysqld/mysqld.sock ]; then
+    # check mysqld status
+    if ! mysqladmin ping --user=root --password="$MYSQL_ROOT_PASSWORD" >/dev/null; then
         exit 1
     fi
     # check mysqld status
-    if ! mysqladmin status --user=root --password="$MYSQL_ROOT_PASSWORD" >/dev/null; then
-        exit 1
-    fi
-    # check galera status
-    if ! status wsrep_ready; then
-        exit 1
-    fi
-}
-
-is_alive() {
     if ! mysqladmin status --user=root --password="$MYSQL_ROOT_PASSWORD" >/dev/null; then
         exit 1
     fi
@@ -31,7 +21,7 @@ case "$1" in
         is_ready
         ;;
     --liveness)
-        is_alive
+        is_ready
         ;;
     *)
         ;;

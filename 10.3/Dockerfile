@@ -1,7 +1,7 @@
 FROM debian:buster-slim
 
 ARG MARIADB_MAJOR=10.3
-ARG MARIADB_VERSION=1:10.3.29+maria~buster
+ARG MARIADB_VERSION=1:10.3.39+maria~buster
 
 ENV GOSU_VERSION 1.12
 
